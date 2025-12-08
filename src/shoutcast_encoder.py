@@ -3,6 +3,7 @@ import re
 import socket
 import subprocess
 import threading
+import sys
 import time
 import requests
 
@@ -12,36 +13,22 @@ class ShoutcastEncoder(threading.Thread):
     """
     Handles audio capture with FFmpeg and streaming to a SHOUTcast v2 server via HTTP PUT.
     """
-    def __init__(self, index: int, config: dict, audio_device_index: int):
+    def __init__(self, index: int, config: dict, audio_device_name: str):
         super().__init__(daemon=True)
         self.index = index
         self.config = config
-        self.audio_device_index = audio_device_index
+        self.audio_device_name = audio_device_name
         self.running = False
         self.status = "Stopped"
         self.color = "gray"
         self.ffmpeg_process = None
         self.session = None
+        self.v1_socket = None
 
     def _update_status(self, status: str, color: str):
         self.status = status
         self.color = color
         log(f"Encoder {self.index + 1} ({self.config['name']}): {status}")
-
-    def _get_audio_device_name(self) -> str:
-        """Finds the audio device name for FFmpeg using its index."""
-        if self.audio_device_index == -1:
-            # This may or may not work depending on FFmpeg's default.
-            # It's better to explicitly select a device.
-            log("Warning: No audio device selected. FFmpeg will use its default.")
-            return "default"
-
-        # Use the definitive list from FFmpeg itself.
-        # The index in the config corresponds to the index in this list.
-        devices = get_ffmpeg_dshow_devices()
-        if 0 <= self.audio_device_index < len(devices):
-            return devices[self.audio_device_index]['name']
-        return "default"
 
     def _is_shoutcast_v1(self) -> bool:
         """
@@ -66,15 +53,12 @@ class ShoutcastEncoder(threading.Thread):
         self.running = True
         self._update_status("Starting...", "#f59e0b")
 
-        # 1. Get the audio device name for FFmpeg
-        # On Windows, FFmpeg uses dshow and identifies devices by name.
-        device_name = self._get_audio_device_name()
-
-        # 2. Construct the FFmpeg command
+        # 1. Construct the FFmpeg command
+        # On Windows, FFmpeg uses dshow and identifies devices by name like "Microphone (Realtek High Definition Audio)"
         ffmpeg_command = [
             'ffmpeg',
             '-f', 'dshow',  # Use DirectShow for audio capture on Windows
-            '-i', f'audio={device_name}',
+            '-i', f'audio={self.audio_device_name}',
             '-acodec', 'libmp3lame',  # Encode to MP3
             '-ar', '44100',          # Sample rate
             '-ac', '2',              # Stereo
@@ -84,7 +68,7 @@ class ShoutcastEncoder(threading.Thread):
             'pipe:1'                 # Output to stdout
         ]
 
-        # 3. Start the FFmpeg subprocess
+        # 2. Start the FFmpeg subprocess
         try:
             self._update_status("Launching FFmpeg...", "#f59e0b")
             self.ffmpeg_process = subprocess.Popen(
@@ -135,59 +119,48 @@ class ShoutcastEncoder(threading.Thread):
         self.session.headers.update(headers)
         self.session.auth = ('source', self.config['password'])
 
-        while self.running:
-            try:
+        try:
+            while self.running:
                 self._update_status("Connecting...", "#f59e0b")
-                # Use a context manager for the request
-                resp = self.session.put(
+                # The `put` call will block here and stream data from ffmpeg.
+                # When `self.session.close()` is called from `stop()`, this will raise an exception.
+                self.session.put(
                     stream_url,
                     data=self.ffmpeg_process.stdout,
                     stream=True
                 )
-                # Raise an exception for bad status codes (4xx or 5xx)
-                resp.raise_for_status()
+                # If the stream ends (e.g., server disconnects), the loop continues.
+                if not self.running: break
+                self._update_status("Stream ended. Reconnecting...", "#f59e0b")
+                time.sleep(5)
 
-                self._update_status("Streaming", "#22c55e")
-                # The data is being streamed by the `data` argument in session.put.
-                # We just need to wait here. If the connection drops,
-                # the loop will restart. The `iter_content` is a good way
-                # to detect a dropped connection during streaming.
-                for _ in resp.iter_content(chunk_size=1024):
-                    if not self.running or self.ffmpeg_process.poll() is not None:
-                        break
-
-            except requests.exceptions.RequestException as e:
-                # This will catch HTTP errors (like 401) and connection errors
+        except requests.exceptions.RequestException as e:
+            # This will catch HTTP errors (like 401) and connection errors during the initial connect.
+            # It will also catch the error from self.session.close() when stopping.
+            if self.running: # Only log as an error if we weren't intentionally stopping.
                 status_msg = f"Stream Error: {e}"
-                if e.response is not None:
+                if hasattr(e, 'response') and e.response is not None:
                     status_msg = f"Connect Error: {e.response.status_code} {e.response.reason}"
-                    # Log the server's response text, which often contains the reason for failure
                     log(f"Server response for {self.config['name']}: {e.response.text.strip()}")
                 self._update_status(status_msg, "#f97373")
-
-            except Exception as e:
-                self._update_status(f"Unhandled Error: {e}", "#f97373")
-
-            if not self.running:
-                break
-
-            log(f"Encoder {self.index + 1}: Connection lost. Reconnecting in 5 seconds...")
-            time.sleep(5)
+        finally:
+            if self.session:
+                self.session.close()
 
     def _run_shoutcast_v1(self):
         """Handles streaming to legacy Shoutcast v1 servers."""
         self._update_status("Using Shoutcast v1 protocol", "#f59e0b")
         
         while self.running:
-            sock = None
+            self.v1_socket = None
             try:
                 self._update_status("Connecting (v1)...", "#f59e0b")
-                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                sock.settimeout(10)
-                sock.connect((self.config['host'], self.config['port']))
+                self.v1_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                self.v1_socket.settimeout(10)
+                self.v1_socket.connect((self.config['host'], self.config['port']))
 
                 # 1. Send password
-                sock.sendall(f"{self.config['password']}\r\n".encode())
+                self.v1_socket.sendall(f"{self.config['password']}\r\n".encode())
 
                 # 2. Send ICY headers
                 headers = [
@@ -197,20 +170,22 @@ class ShoutcastEncoder(threading.Thread):
                     f"icy-br:128", # Bitrate
                     "\r\n" # End of headers
                 ]
-                sock.sendall("\r\n".join(headers).encode())
+                self.v1_socket.sendall("\r\n".join(headers).encode())
 
                 self._update_status("Streaming (v1)", "#22c55e")
                 while self.running:
                     chunk = self.ffmpeg_process.stdout.read(4096)
                     if not chunk:
                         break # FFmpeg process ended
-                    sock.sendall(chunk)
+                    self.v1_socket.sendall(chunk)
 
             except (socket.error, socket.timeout, BrokenPipeError) as e:
-                self._update_status(f"Stream Error (v1): {e}", "#f97373")
+                # Only log as an error if we weren't intentionally stopping
+                if self.running:
+                    self._update_status(f"Stream Error (v1): {e}", "#f97373")
             finally:
-                if sock:
-                    sock.close()
+                if self.v1_socket:
+                    self.v1_socket.close()
 
             if not self.running:
                 break
@@ -219,8 +194,12 @@ class ShoutcastEncoder(threading.Thread):
 
     def stop(self):
         self.running = False
+        # Closing the session will interrupt the blocking `put` call in _run_shoutcast_v2
         if self.session:
             self.session.close()
+        # Closing the socket will interrupt the blocking `read` or `sendall` in _run_shoutcast_v1
+        if self.v1_socket:
+            self.v1_socket.close()
 
     def _cleanup(self):
         if self.ffmpeg_process:
@@ -239,13 +218,22 @@ def get_ffmpeg_dshow_devices() -> list:
     This is the most reliable way to get names FFmpeg will understand.
     """
     devices = []
-    # Ensure ffmpeg is available before trying to run it.
-    if not any(os.access(os.path.join(path, 'ffmpeg.exe'), os.X_OK) for path in os.environ["PATH"].split(os.pathsep)):
-        log("CRITICAL: ffmpeg.exe not found in system PATH. Audio devices cannot be listed.")
-        return []
+    
+    # Determine the path to ffmpeg.exe using a helper function
+    # This logic is now simplified and more robust.
+    try:
+        # In a frozen app, this will point to the bundled ffmpeg.exe
+        base_path = sys._MEIPASS
+        ffmpeg_path = os.path.join(base_path, 'ffmpeg.exe')
+    except Exception:
+        # In a dev environment, assume it's in the system PATH
+        ffmpeg_path = 'ffmpeg'
+        if not any(os.access(os.path.join(path, 'ffmpeg.exe'), os.X_OK) for path in os.environ["PATH"].split(os.pathsep)):
+            log("CRITICAL: ffmpeg.exe not found in system PATH or bundled. Audio devices cannot be listed.")
+            return []
     try:
         # Command to list dshow devices
-        command = ['ffmpeg', '-list_devices', 'true', '-f', 'dshow', '-i', 'dummy']
+        command = [ffmpeg_path, '-list_devices', 'true', '-f', 'dshow', '-i', 'dummy']
         # Run the command, capturing output
         result = subprocess.run(
             command,

@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import os
+import sys
 import time
 import threading
 import logging
@@ -11,8 +12,8 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 from PIL import ImageTk, Image  # Added for image support in Tkinter
 
-from config import (
-    LOGO_FILE, CONFIG_PATH, ENCODERS, HTTP_HOST, HTTP_PORT, save_config_from_gui, config
+from config import ( 
+    CONFIG_PATH, ENCODERS, HTTP_HOST, HTTP_PORT, save_config_from_gui, config
 )
 from utils import log, log_queue, TkLogHandler
 from web_overlay import format_eta, shared_state as overlay_shared_state
@@ -24,6 +25,16 @@ import services
 # GLOBALS / LOGGING
 # ======================================================
 
+def resource_path(relative_path):
+    """ Get absolute path to resource, works for dev and for PyInstaller """
+    try:
+        # PyInstaller creates a temp folder and stores path in _MEIPASS
+        base_path = sys._MEIPASS
+    except Exception:
+        base_path = os.path.abspath(".")
+    return os.path.join(base_path, relative_path)
+
+LOGO_FILE = resource_path("logo.png")
 audio_device_combo: ttk.Combobox = None # Global reference to the audio device dropdown
 
 werk_handler = TkLogHandler()
@@ -161,8 +172,21 @@ def build_gui() -> tk.Tk:
     notebook.add(logs_frame, text="Logs")
     notebook.add(config_tab, text="Config")
 
+    # ===== DASHBOARD TAB (with scrolling) =====
+    dash_scroll_canvas = tk.Canvas(dash, bg=bg, highlightthickness=0)
+    dash_scroll_canvas.pack(side="left", fill="both", expand=True)
+
+    dash_scrollbar = ttk.Scrollbar(dash, orient="vertical", command=dash_scroll_canvas.yview)
+    dash_scrollbar.pack(side="right", fill="y")
+
+    dash_inner_frame = ttk.Frame(dash_scroll_canvas)
+    dash_scroll_canvas.create_window((0, 0), window=dash_inner_frame, anchor="nw")
+
+    dash_inner_frame.bind("<Configure>", lambda e: dash_scroll_canvas.configure(scrollregion=dash_scroll_canvas.bbox("all")))
+    dash_scroll_canvas.configure(yscrollcommand=dash_scrollbar.set)
+
     # ===== STATUS PANEL =====
-    status_frame = ttk.LabelFrame(dash, text="Service Status", padding=10)
+    status_frame = ttk.LabelFrame(dash_inner_frame, text="Service Status", padding=10)
     status_frame.pack(fill="x", padx=10, pady=10)
 
     def make_status_row(parent, name, row):
@@ -182,7 +206,7 @@ def build_gui() -> tk.Tk:
         lbl_encoder_statuses.append(make_status_row(status_frame, enc_cfg["name"], 3 + i))
 
     # ===== BLAZE INFO & OVERLAY URL =====
-    info_frame = ttk.LabelFrame(dash, text="Blaze Info", padding=10)
+    info_frame = ttk.LabelFrame(dash_inner_frame, text="Blaze Info", padding=10)
     info_frame.pack(fill="x", padx=10, pady=5)
 
     lbl_next_420 = ttk.Label(info_frame, text="Next 4:20: calculating...", font=("Segoe UI", 10))
@@ -199,7 +223,7 @@ def build_gui() -> tk.Tk:
     lbl_overlay_url.pack(anchor="w", pady=4, padx=8)
 
     # ===== CONTROLS =====
-    controls = ttk.LabelFrame(dash, text="Controls", padding=10)
+    controls = ttk.LabelFrame(dash_inner_frame, text="Controls", padding=10)
     controls.pack(fill="x", padx=10, pady=10)
 
     row = 0

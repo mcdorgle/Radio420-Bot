@@ -194,9 +194,16 @@ def start_encoder(index: int, audio_combo: ttk.Combobox) -> None:
         log("Error: No audio device selected in the Config tab.")
         messagebox.showerror("Audio Device Error", "Please select an audio input device from the dropdown in the 'Config' tab before starting an encoder.")
         return
-    audio_device_idx = int(selection.split(":")[0])
+    
+    # The selection format is "index: device name". We need the name.
+    try:
+        audio_device_name = selection.split(":", 1)[1].strip()
+    except IndexError:
+        log(f"Error: Invalid audio device format selected: '{selection}'")
+        messagebox.showerror("Audio Device Error", f"The selected audio device is invalid.\n'{selection}'")
+        return
 
-    encoder_instances[index] = ShoutcastEncoder(index, ENCODERS[index], audio_device_idx)
+    encoder_instances[index] = ShoutcastEncoder(index, ENCODERS[index], audio_device_name)
     encoder_running[index] = True
     encoder_instances[index].start()
     log(f"Encoder {index+1}: started")
