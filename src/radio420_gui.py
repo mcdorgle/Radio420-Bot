@@ -1,0 +1,422 @@
+#!/usr/bin/env python3
+import os
+import time
+import threading
+import logging
+from datetime import datetime, timedelta
+
+import pytz
+
+import tkinter as tk
+from tkinter import ttk, messagebox
+from PIL import ImageTk, Image  # Added for image support in Tkinter
+
+from config import (
+    LOGO_FILE, CONFIG_PATH, ENCODERS, HTTP_HOST, HTTP_PORT, save_config_from_gui, config
+)
+from utils import log, log_queue, TkLogHandler
+from web_overlay import format_eta, shared_state as overlay_shared_state
+from blaze_it import fire_420
+from shoutcast_encoder import get_ffmpeg_dshow_devices
+import services
+
+# ======================================================
+# GLOBALS / LOGGING
+# ======================================================
+
+audio_device_combo: ttk.Combobox = None # Global reference to the audio device dropdown
+
+werk_handler = TkLogHandler()
+werk_handler.setFormatter(logging.Formatter("[%(levelname)s] %(message)s"))
+
+werk_log = logging.getLogger("werkzeug")
+werk_log.setLevel(logging.INFO)
+werk_log.addHandler(werk_handler)
+
+root_logger = logging.getLogger()
+root_logger.setLevel(logging.INFO)
+root_logger.addHandler(werk_handler)
+
+# ======================================================
+# SERVICE CONTROL (with thread joining for clean shutdown)
+# ======================================================
+
+
+def start_twitch() -> None:
+    services.start_twitch()
+
+def stop_twitch() -> None:
+    services.stop_twitch()
+
+def restart_twitch() -> None:
+    stop_twitch()
+    time.sleep(1)
+    start_twitch()
+
+def start_overlay() -> None:
+    services.start_overlay()
+
+def stop_overlay() -> None:
+    services.stop_overlay()
+
+def restart_overlay() -> None:
+    stop_overlay()
+    time.sleep(1)
+    start_overlay()
+
+def start_encoder(index: int, audio_combo: ttk.Combobox) -> None:
+    services.start_encoder(index, audio_combo)
+
+def stop_encoder(index: int) -> None:
+    services.stop_encoder(index)
+
+def restart_encoder(index: int, audio_combo: ttk.Combobox) -> None:
+    stop_encoder(index)
+    time.sleep(1)
+    start_encoder(index, audio_combo)
+
+def start_420() -> None:
+    services.start_420()
+
+def stop_420() -> None:
+    services.stop_420()
+
+def restart_420() -> None:
+    stop_420()
+    time.sleep(1)
+    start_420()
+
+def test_420() -> None:
+    msg = fire_420(services.bot_instance, test=True)
+    overlay_shared_state["last_420_message"] = msg
+    overlay_shared_state["popup_message"] = msg
+    overlay_shared_state["popup_expire_utc"] = datetime.now(pytz.utc) + timedelta(seconds=12)
+
+def handle_save_config(entries: dict) -> None:
+    save_config_from_gui(entries)
+    messagebox.showinfo("Config Saved", "Config updated.\nRestart services for full effect.")
+    log("Config saved to " + CONFIG_PATH)
+
+# ======================================================
+# GUI (enhanced with logo, better styling, gradients, and layout)
+# ======================================================
+
+
+def build_gui() -> tk.Tk:
+    global audio_device_combo
+    root = tk.Tk()
+    root.title("RadioBot v1.7")
+    root.geometry("600x750")  # Set a default size for better appearance
+
+    bg = "#05040a"  # Dark background
+    txt = "#b7ffb7"  # Light green text
+    accent = "#22c55e"  # Green accent
+    danger = "#f97373"  # Red for offline
+    secondary = "#1e1b2e"  # Darker secondary background for frames
+    root.configure(bg=bg)
+
+    style = ttk.Style()
+    style.theme_use("clam")
+    style.configure(".", background=bg, foreground=txt)
+    style.configure("TFrame", background=bg)
+    style.configure("TLabel", background=bg, foreground=txt)
+    style.configure("TLabelframe", background=secondary, foreground=txt)
+    style.configure("TLabelframe.Label", background=secondary, foreground=accent)
+    style.configure("TButton", padding=6, background=secondary, foreground=txt)
+    style.map("TButton", background=[("active", accent)], foreground=[("active", bg)])
+    style.configure("TNotebook", background=bg, foreground=txt)
+    style.configure("TNotebook.Tab", background=secondary, foreground=txt)
+    style.map("TNotebook.Tab", background=[("selected", accent)], foreground=[("selected", bg)])
+    style.configure("TCheckbutton", background=secondary, foreground=txt)
+    style.configure("TEntry", foreground="black", fieldbackground="white")
+    style.configure("TCombobox", foreground="black", fieldbackground="white")
+
+    # Header frame for logo and title
+    header_frame = ttk.Frame(root, padding=10)
+    header_frame.pack(fill="x", pady=10)
+
+    # Load and display logo (resize to fit)
+    if os.path.exists(LOGO_FILE):
+        logo_img = Image.open(LOGO_FILE)
+        logo_img = logo_img.resize((100, 100), Image.LANCZOS)  # Resize logo smaller
+        logo_photo = ImageTk.PhotoImage(logo_img)
+        logo_label = tk.Label(header_frame, image=logo_photo, bg=bg)
+        logo_label.image = logo_photo  # Keep reference
+        logo_label.pack(side="left", padx=10)
+    else:
+        log(f"Logo file not found at {LOGO_FILE}. Skipping logo display.")
+
+    # App title
+    title_label = ttk.Label(header_frame, text="Radio420 Control Panel", font=("Segoe UI", 18, "bold"), foreground=accent)
+    title_label.pack(side="left", expand=True)
+
+    notebook = ttk.Notebook(root)
+    notebook.pack(fill="both", expand=True, padx=10, pady=10)
+
+    dash = ttk.Frame(notebook)
+    logs_frame = ttk.Frame(notebook)
+    config_tab = ttk.Frame(notebook)
+
+    notebook.add(dash, text="Dashboard")
+    notebook.add(logs_frame, text="Logs")
+    notebook.add(config_tab, text="Config")
+
+    # ===== STATUS PANEL =====
+    status_frame = ttk.LabelFrame(dash, text="Service Status", padding=10)
+    status_frame.pack(fill="x", padx=10, pady=10)
+
+    def make_status_row(parent, name, row):
+        ttk.Label(parent, text=name + ":", font=("Segoe UI", 10)).grid(row=row, column=0, sticky="w", padx=8, pady=4)
+        lbl = tk.Label(parent, text="○ OFFLINE", bg=secondary, fg=danger, font=("Segoe UI", 10, "bold"), relief="flat", padx=8, pady=4)
+        lbl.grid(row=row, column=1, sticky="w", padx=8, pady=4)
+        return lbl
+
+    lbl_twitch_status = make_status_row(status_frame, "Twitch Bot", 0)
+    lbl_overlay_status = make_status_row(status_frame, "Overlay Server", 1)
+    lbl_420_status = make_status_row(status_frame, "420 Timer", 2)
+
+    # Shoutcast Encoder Statuses (now for our own encoders)
+    lbl_encoder_statuses = []
+    # for i in range(len(ENCODERS)):
+    for i, enc_cfg in enumerate(ENCODERS):
+        lbl_encoder_statuses.append(make_status_row(status_frame, enc_cfg["name"], 3 + i))
+
+    # ===== BLAZE INFO & OVERLAY URL =====
+    info_frame = ttk.LabelFrame(dash, text="Blaze Info", padding=10)
+    info_frame.pack(fill="x", padx=10, pady=5)
+
+    lbl_next_420 = ttk.Label(info_frame, text="Next 4:20: calculating...", font=("Segoe UI", 10))
+    lbl_next_420.pack(anchor="w", pady=4, padx=8)
+
+    lbl_last_420 = ttk.Label(info_frame, text="Last Event: none", font=("Segoe UI", 10))
+    lbl_last_420.pack(anchor="w", pady=4, padx=8)
+
+    lbl_overlay_url = ttk.Label(
+        info_frame,
+        text=f"Overlay URL: http://{HTTP_HOST}:{HTTP_PORT}/",
+        font=("Segoe UI", 10)
+    )
+    lbl_overlay_url.pack(anchor="w", pady=4, padx=8)
+
+    # ===== CONTROLS =====
+    controls = ttk.LabelFrame(dash, text="Controls", padding=10)
+    controls.pack(fill="x", padx=10, pady=10)
+
+    row = 0
+    ttk.Label(controls, text="Twitch Bot", font=("Segoe UI", 10)).grid(row=row, column=0, sticky="w", padx=8, pady=6)
+    ttk.Button(controls, text="Start", command=start_twitch).grid(row=row, column=1, padx=8, pady=6)
+    ttk.Button(controls, text="Stop", command=stop_twitch).grid(row=row, column=2, padx=8, pady=6)
+    ttk.Button(controls, text="Restart", command=restart_twitch).grid(row=row, column=3, padx=8, pady=6)
+
+    row += 1
+    ttk.Label(controls, text="Overlay Server", font=("Segoe UI", 10)).grid(row=row, column=0, sticky="w", padx=8, pady=6)
+    ttk.Button(controls, text="Start", command=start_overlay).grid(row=row, column=1, padx=8, pady=6)
+    ttk.Button(controls, text="Stop", command=stop_overlay).grid(row=row, column=2, padx=8, pady=6)
+    ttk.Button(controls, text="Restart", command=restart_overlay).grid(row=row, column=3, padx=8, pady=6)
+
+    row += 1
+    ttk.Label(controls, text="420 Timer", font=("Segoe UI", 10)).grid(row=row, column=0, sticky="w", padx=8, pady=6)
+    ttk.Button(controls, text="Start", command=start_420).grid(row=row, column=1, padx=8, pady=6)
+    ttk.Button(controls, text="Stop", command=stop_420).grid(row=row, column=2, padx=8, pady=6)
+    ttk.Button(controls, text="Restart", command=restart_420).grid(row=row, column=3, padx=8, pady=6)
+
+    row += 1
+    ttk.Button(controls, text="TEST 4:20 Blaze", command=test_420).grid(
+        row=row, column=0, padx=8, pady=10, sticky="w", columnspan=2
+    )
+
+    # Add Encoder Controls
+    for i in range(3): # Always show controls for all 3 possible encoders
+        row += 1
+        enc_name = ENCODERS[i]["name"] if i < len(ENCODERS) else f"Encoder {i+1}"
+        ttk.Label(controls, text=f"Encoder: {enc_name}", font=("Segoe UI", 10)).grid(row=row, column=0, sticky="w", padx=8, pady=6)
+        ttk.Button(controls, text="Start", command=lambda i=i: start_encoder(i, audio_device_combo)).grid(row=row, column=1, padx=8, pady=6)
+        ttk.Button(controls, text="Stop", command=lambda i=i: stop_encoder(i)).grid(row=row, column=2, padx=8, pady=6)
+        ttk.Button(controls, text="Restart", command=lambda i=i: restart_encoder(i, audio_device_combo)).grid(row=row, column=3, padx=8, pady=6)
+
+
+    def quit_all() -> None:
+        stop_420()
+        stop_overlay()
+        stop_twitch()
+        for i in range(len(ENCODERS)): stop_encoder(i)
+        root.after(300, root.destroy)
+    
+
+    ttk.Button(controls, text="Quit", command=quit_all).grid(
+        row=row, column=3, padx=8, pady=10, sticky="e"
+    )
+
+    # ===== LOGS TAB (with scrollbar) =====
+    log_container = ttk.Frame(logs_frame)
+    log_container.pack(fill="both", expand=True, padx=10, pady=10)
+
+    scrollbar = ttk.Scrollbar(log_container)
+    scrollbar.pack(side="right", fill="y")
+
+    txt_log = tk.Text(
+        log_container,
+        height=20,
+        bg="#0b0715",
+        fg=txt,
+        insertbackground=txt,
+        borderwidth=0,
+        yscrollcommand=scrollbar.set,
+        font=("Segoe UI", 9)
+    )
+    txt_log.pack(side="left", fill="both", expand=True)
+    scrollbar.config(command=txt_log.yview)
+
+    # ===== CONFIG TAB =====
+    config_scroll = tk.Canvas(config_tab, bg=bg)
+    config_scroll.pack(side="left", fill="both", expand=True)
+
+    config_scrollbar = ttk.Scrollbar(config_tab, orient="vertical", command=config_scroll.yview)
+    config_scrollbar.pack(side="right", fill="y")
+
+    config_inner = ttk.Frame(config_scroll)
+    config_scroll.create_window((0, 0), window=config_inner, anchor="nw")
+
+    config_inner.bind("<Configure>", lambda e: config_scroll.configure(scrollregion=config_scroll.bbox("all")))
+    config_scroll.configure(yscrollcommand=config_scrollbar.set)
+
+    config_entries = {}
+
+    # --- Audio Config ---
+    audio_frame = ttk.LabelFrame(config_inner, text="audio", padding=10)
+    audio_frame.pack(fill="x", padx=10, pady=5, anchor="n")
+
+    audio_devices = get_ffmpeg_dshow_devices()
+    device_names = [f"{d['index']}: {d['name']}" for d in audio_devices]
+    
+    rowf_audio = ttk.Frame(audio_frame)
+    rowf_audio.pack(fill="x", pady=4)
+    ttk.Label(rowf_audio, text="Input Device", width=20, font=("Segoe UI", 10)).pack(side="left", padx=5)
+    
+    audio_device_combo = ttk.Combobox(rowf_audio, values=device_names, font=("Segoe UI", 10), state="readonly")
+    if device_names:
+        audio_device_combo.set(device_names[0]) # Default to the first device
+    audio_device_combo.pack(side="left", fill="x", expand=True, padx=5)
+
+    for section in config.sections():
+        if section == "audio" or section.startswith("encoder"): continue # Handled separately
+        sec_frame = ttk.LabelFrame(config_inner, text=section, padding=10)
+        sec_frame.pack(fill="x", padx=10, pady=5)
+
+        config_entries[section] = {}
+
+        for key, value in config[section].items():
+            rowf = ttk.Frame(sec_frame)
+            rowf.pack(fill="x", pady=4)
+
+            ttk.Label(rowf, text=key, width=20, font=("Segoe UI", 10)).pack(side="left", padx=5)
+            e = ttk.Entry(rowf, font=("Segoe UI", 10))
+            e.insert(0, value)
+            e.pack(side="left", fill="x", expand=True, padx=5)
+
+            config_entries[section][key] = e
+
+    # Add Shoutcast Encoder Configs
+    for i, enc_cfg in enumerate(ENCODERS):
+        section_name = f"Encoder {i+1} ({enc_cfg['name']})"
+        sec_frame = ttk.LabelFrame(config_inner, text=section_name, padding=10)
+        sec_frame.pack(fill="x", padx=10, pady=5)
+
+        config_entries[f"encoder{i+1}"] = {}
+
+        # Enabled checkbox
+        rowf_enabled = ttk.Frame(sec_frame)
+        rowf_enabled.pack(fill="x", pady=4)
+        ttk.Label(rowf_enabled, text="enabled", width=20, font=("Segoe UI", 10)).pack(side="left", padx=5)
+        enabled_var = tk.BooleanVar(value=enc_cfg["enabled"])
+        chk_enabled = ttk.Checkbutton(rowf_enabled, variable=enabled_var)
+        chk_enabled.pack(side="left", padx=5)
+        config_entries[f"encoder{i+1}"]["enabled"] = enabled_var # Store the variable
+
+        for key in ["name", "host", "port", "password", "mount"]:
+            rowf = ttk.Frame(sec_frame)
+            rowf.pack(fill="x", pady=4)
+
+            ttk.Label(rowf, text=key, width=20, font=("Segoe UI", 10)).pack(side="left", padx=5)
+            e = ttk.Entry(rowf, font=("Segoe UI", 10))
+            e.insert(0, str(enc_cfg[key]))
+            e.pack(side="left", fill="x", expand=True, padx=5)
+
+            config_entries[f"encoder{i+1}"][key] = e
+
+    ttk.Button(
+        config_inner,
+        text="💾 Save Config",
+        command=lambda: handle_save_config(config_entries),
+    ).pack(pady=10)
+
+    # ===== UI UPDATE LOOP =====
+    def update_ui() -> None:
+        # logs
+        while not log_queue.empty():
+            line = log_queue.get()
+            txt_log.insert("end", line + "\n")
+            txt_log.see("end")
+
+        # status lights
+        if services.twitch_running:
+            lbl_twitch_status.config(text="● ONLINE", fg=accent)
+        else:
+            lbl_twitch_status.config(text="○ OFFLINE", fg=danger)
+
+        if services.overlay_running:
+            lbl_overlay_status.config(text="● RUNNING", fg=accent)
+        else:
+            lbl_overlay_status.config(text="○ STOPPED", fg=danger)
+
+        if services.tracker_running and services.announcer_running:
+            lbl_420_status.config(text="● ACTIVE", fg=accent)
+        else:
+            lbl_420_status.config(text="○ IDLE", fg=danger)
+
+        # Encoder statuses
+        for i in range(len(ENCODERS)):
+            if services.encoder_running[i] and services.encoder_instances[i]:
+                lbl_encoder_statuses[i].config(text=f"● {services.encoder_instances[i].status}", fg=services.encoder_instances[i].color, bg=secondary)
+            else:
+                lbl_encoder_statuses[i].config(text="○ STOPPED", fg="gray")
+
+
+        # blaze info
+        next_utc = overlay_shared_state.get("next_420_utc")
+        next_city = overlay_shared_state.get("next_420_city")
+        if next_utc and next_city:
+            eta = format_eta(next_utc - datetime.now(pytz.utc))
+            lbl_next_420.config(text=f"Next 4:20: {next_city} — {eta}")
+        else:
+            lbl_next_420.config(text="Next 4:20: calculating...")
+
+        last_420_message = overlay_shared_state.get("last_420_message")
+        lbl_last_420.config(
+            text=f"Last Event: {last_420_message}" if last_420_message else "Last Event: none",
+        )
+
+        root.after(300, update_ui)
+
+    update_ui()
+    return root
+
+
+# ======================================================
+# MAIN (with auto-start services option if desired)
+# ======================================================
+
+if __name__ == "__main__":
+    # Optional: Auto-start services on launch
+    # start_twitch()
+    # start_overlay()
+    # start_420()
+
+    gui = build_gui()
+    gui.mainloop()
+
+    # Clean shutdown
+    stop_twitch()
+    stop_overlay()
+    stop_420()
+    for i in range(3): stop_encoder(i)
