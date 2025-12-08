@@ -79,6 +79,12 @@ def run_twitch_loop():
                     except Exception: pass
                 if "PRIVMSG" in line:
                     user, msg = bot_instance.parse(line)
+                    if not user and "Login authentication failed" in msg:
+                        log("Twitch Error: Login authentication failed. Please check your oauth token in config.ini.")
+                        messagebox.showerror("Twitch Auth Error", "Login failed. Please check your 'oauth' token in the config and restart the bot.")
+                        # Stop the service to prevent a reconnect loop
+                        stop_twitch()
+                        return
                     if not msg: continue
                     if msg.startswith("!search"):
                         bot_instance.search(user, msg[8:].strip())

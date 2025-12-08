@@ -15,7 +15,7 @@ if getattr(sys, "frozen", False):
 else:
     # Look for config relative to the current working directory, not the script file.
     # This is more robust for development environments.
-    APP_DIR = os.path.join(os.getcwd(), "src")
+    APP_DIR = os.getcwd()
     BUNDLE_DIR = APP_DIR
     CONFIG_PATH = os.path.join(APP_DIR, "config.ini")
 
@@ -106,11 +106,6 @@ COLOR = config.get("style", "text_color", fallback="#FFEB3B")
 TITLECOL = config.get("style", "title_color", fallback="#FFC107")
 FSIZE = config.getint("style", "font_size", fallback=20)
 
-# Validate critical config values
-required_twitch = [TWITCH_NICK, TWITCH_CHANNEL, TWITCH_OAUTH]
-if not all(required_twitch) or "your_twitch_username" in TWITCH_NICK:
-    raise ValueError("Twitch config missing: nick, channel, or oauth.")
-
 # Shoutcast Encoder Configs (up to 3)
 ENCODERS = []
 for i in range(1, 4):
@@ -126,10 +121,18 @@ for i in range(1, 4):
         })
 
 def save_config_from_gui(entries: dict) -> None:
+    """Saves the configuration from the GUI's entry widgets and variables."""
     # update config object
     for section, keys in entries.items():
         if section != "audio": # Do not save the audio section directly, it's a combobox selection
             for key, value_source in keys.items():
-                config.set(section, key, str(value_source.get()))
+                # Handle different Tkinter variable types
+                if hasattr(value_source, 'get'): # Covers Entry, BooleanVar, etc.
+                    val = value_source.get()
+                    # Explicitly convert booleans to 'true'/'false' for config file clarity
+                    if isinstance(val, bool):
+                        config.set(section, key, 'true' if val else 'false')
+                    else:
+                        config.set(section, key, str(val))
     with open(CONFIG_PATH, "w", encoding="utf-8") as f:
         config.write(f)

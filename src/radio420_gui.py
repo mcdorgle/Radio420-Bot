@@ -236,14 +236,22 @@ def build_gui() -> tk.Tk:
 
 
     def quit_all() -> None:
-        stop_420()
-        stop_overlay()
-        stop_twitch()
-        for i in range(len(ENCODERS)): stop_encoder(i)
-        root.after(300, root.destroy)
-    
+        """Stops all services in a separate thread to avoid freezing the GUI, then quits."""
+        def shutdown_thread():
+            log("Shutting down all services...")
+            # Disable the quit button to prevent multiple clicks
+            quit_button.config(state="disabled", text="Quitting...")
+            stop_420()
+            stop_overlay()
+            stop_twitch()
+            for i in range(len(ENCODERS)):
+                stop_encoder(i)
+            log("All services stopped. Exiting.")
+            root.after(100, root.destroy) # Safely destroy the root window from the main thread
+        threading.Thread(target=shutdown_thread, daemon=True).start()
 
-    ttk.Button(controls, text="Quit", command=quit_all).grid(
+    quit_button = ttk.Button(controls, text="Quit", command=quit_all)
+    quit_button.grid(
         row=row, column=3, padx=8, pady=10, sticky="e"
     )
 
@@ -415,8 +423,11 @@ if __name__ == "__main__":
     gui = build_gui()
     gui.mainloop()
 
-    # Clean shutdown
-    stop_twitch()
-    stop_overlay()
-    stop_420()
-    for i in range(3): stop_encoder(i)
+    # The mainloop has exited. The shutdown logic is now handled by the `quit_all` function
+    # to ensure threads are joined correctly before the application closes.
+    # We can add a final log here to confirm exit.
+    print("Radio420 GUI closed.")
+    # stop_twitch()
+    # stop_overlay()
+    # stop_420()
+    # for i in range(3): stop_encoder(i)
