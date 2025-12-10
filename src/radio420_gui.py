@@ -20,7 +20,7 @@ from web_overlay import format_eta, shared_state as overlay_shared_state
 from blaze_it import fire_420
 from shoutcast_encoder import get_ffmpeg_dshow_devices
 import services
-
+from functools import partial
 # ======================================================
 # GLOBALS / LOGGING
 # ======================================================
@@ -31,10 +31,12 @@ def resource_path(relative_path):
         # PyInstaller creates a temp folder and stores path in _MEIPASS
         base_path = sys._MEIPASS
     except Exception:
-        base_path = os.path.abspath(".")
+        # For development, the base path is the directory of the script
+        base_path = os.path.dirname(os.path.abspath(__file__))
     return os.path.join(base_path, relative_path)
 
 LOGO_FILE = resource_path("logo.png")
+ICON_FILE = resource_path("logo.ico")
 audio_device_combo: ttk.Combobox = None # Global reference to the audio device dropdown
 
 werk_handler = TkLogHandler()
@@ -116,8 +118,14 @@ def handle_save_config(entries: dict) -> None:
 def build_gui() -> tk.Tk:
     global audio_device_combo
     root = tk.Tk()
-    root.title("RadioBot v1.7")
+    root.title("Radio420 Control Panel v1.8")
     root.geometry("600x750")  # Set a default size for better appearance
+
+    # Set the window icon, ensuring it's bundled
+    if os.path.exists(ICON_FILE):
+        root.iconbitmap(ICON_FILE)
+    else:
+        log(f"Icon file not found at {ICON_FILE}. Skipping icon.")
 
     bg = "#05040a"  # Dark background
     txt = "#b7ffb7"  # Light green text
@@ -131,7 +139,7 @@ def build_gui() -> tk.Tk:
     style.configure(".", background=bg, foreground=txt)
     style.configure("TFrame", background=bg)
     style.configure("TLabel", background=bg, foreground=txt)
-    style.configure("TLabelframe", background=secondary, foreground=txt)
+    style.configure("TLabelframe", background=secondary, foreground=txt, borderwidth=0)
     style.configure("TLabelframe.Label", background=secondary, foreground=accent)
     style.configure("TButton", padding=6, background=secondary, foreground=txt)
     style.map("TButton", background=[("active", accent)], foreground=[("active", bg)])
@@ -185,26 +193,6 @@ def build_gui() -> tk.Tk:
     dash_inner_frame.bind("<Configure>", lambda e: dash_scroll_canvas.configure(scrollregion=dash_scroll_canvas.bbox("all")))
     dash_scroll_canvas.configure(yscrollcommand=dash_scrollbar.set)
 
-    # ===== STATUS PANEL =====
-    status_frame = ttk.LabelFrame(dash_inner_frame, text="Service Status", padding=10)
-    status_frame.pack(fill="x", padx=10, pady=10)
-
-    def make_status_row(parent, name, row):
-        ttk.Label(parent, text=name + ":", font=("Segoe UI", 10)).grid(row=row, column=0, sticky="w", padx=8, pady=4)
-        lbl = tk.Label(parent, text="○ OFFLINE", bg=secondary, fg=danger, font=("Segoe UI", 10, "bold"), relief="flat", padx=8, pady=4)
-        lbl.grid(row=row, column=1, sticky="w", padx=8, pady=4)
-        return lbl
-
-    lbl_twitch_status = make_status_row(status_frame, "Twitch Bot", 0)
-    lbl_overlay_status = make_status_row(status_frame, "Overlay Server", 1)
-    lbl_420_status = make_status_row(status_frame, "420 Timer", 2)
-
-    # Shoutcast Encoder Statuses (now for our own encoders)
-    lbl_encoder_statuses = []
-    # for i in range(len(ENCODERS)):
-    for i, enc_cfg in enumerate(ENCODERS):
-        lbl_encoder_statuses.append(make_status_row(status_frame, enc_cfg["name"], 3 + i))
-
     # ===== BLAZE INFO & OVERLAY URL =====
     info_frame = ttk.LabelFrame(dash_inner_frame, text="Blaze Info", padding=10)
     info_frame.pack(fill="x", padx=10, pady=5)
@@ -222,49 +210,62 @@ def build_gui() -> tk.Tk:
     )
     lbl_overlay_url.pack(anchor="w", pady=4, padx=8)
 
-    # ===== CONTROLS =====
-    controls = ttk.LabelFrame(dash_inner_frame, text="Controls", padding=10)
-    controls.pack(fill="x", padx=10, pady=10)
+    # ===== SERVICE CONTROLS (Integrated Status & Controls) =====
+    services_frame = ttk.LabelFrame(dash_inner_frame, text="Service Controls", padding=10)
+    services_frame.pack(fill="x", padx=10, pady=10)
 
-    row = 0
-    ttk.Label(controls, text="Twitch Bot", font=("Segoe UI", 10)).grid(row=row, column=0, sticky="w", padx=8, pady=6)
-    ttk.Button(controls, text="Start", command=start_twitch).grid(row=row, column=1, padx=8, pady=6)
-    ttk.Button(controls, text="Stop", command=stop_twitch).grid(row=row, column=2, padx=8, pady=6)
-    ttk.Button(controls, text="Restart", command=restart_twitch).grid(row=row, column=3, padx=8, pady=6)
+    def create_service_row(parent, name, row, start_cmd, stop_cmd, restart_cmd):
+        """Creates a row with a label, status, and control buttons."""
+        # Service Name
+        ttk.Label(parent, text=name, font=("Segoe UI", 10, "bold")).grid(row=row, column=0, sticky="w", padx=5, pady=8)
 
-    row += 1
-    ttk.Label(controls, text="Overlay Server", font=("Segoe UI", 10)).grid(row=row, column=0, sticky="w", padx=8, pady=6)
-    ttk.Button(controls, text="Start", command=start_overlay).grid(row=row, column=1, padx=8, pady=6)
-    ttk.Button(controls, text="Stop", command=stop_overlay).grid(row=row, column=2, padx=8, pady=6)
-    ttk.Button(controls, text="Restart", command=restart_overlay).grid(row=row, column=3, padx=8, pady=6)
+        # Status Label
+        status_lbl = tk.Label(parent, text="○ OFFLINE", bg=secondary, fg=danger, font=("Segoe UI", 9, "bold"), relief="flat", padx=6, pady=3)
+        status_lbl.grid(row=row, column=1, sticky="w", padx=5, pady=8)
 
-    row += 1
-    ttk.Label(controls, text="420 Timer", font=("Segoe UI", 10)).grid(row=row, column=0, sticky="w", padx=8, pady=6)
-    ttk.Button(controls, text="Start", command=start_420).grid(row=row, column=1, padx=8, pady=6)
-    ttk.Button(controls, text="Stop", command=stop_420).grid(row=row, column=2, padx=8, pady=6)
-    ttk.Button(controls, text="Restart", command=restart_420).grid(row=row, column=3, padx=8, pady=6)
+        # Control Buttons
+        btn_frame = ttk.Frame(parent)
+        btn_frame.grid(row=row, column=2, sticky="e", padx=5, pady=8)
+        ttk.Button(btn_frame, text="Start", command=start_cmd).pack(side="left", padx=3)
+        ttk.Button(btn_frame, text="Stop", command=stop_cmd).pack(side="left", padx=3)
+        ttk.Button(btn_frame, text="Restart", command=restart_cmd).pack(side="left", padx=3)
 
-    row += 1
-    ttk.Button(controls, text="TEST 4:20 Blaze", command=test_420).grid(
-        row=row, column=0, padx=8, pady=10, sticky="w", columnspan=2
-    )
+        parent.grid_columnconfigure(0, weight=1) # Allow name to expand
+        parent.grid_columnconfigure(1, weight=1) # Allow status to expand
+        parent.grid_columnconfigure(2, weight=2) # Give buttons more space
+        return status_lbl
 
-    # Add Encoder Controls
-    for i in range(3): # Always show controls for all 3 possible encoders
-        row += 1
-        enc_name = ENCODERS[i]["name"] if i < len(ENCODERS) else f"Encoder {i+1}"
-        ttk.Label(controls, text=f"Encoder: {enc_name}", font=("Segoe UI", 10)).grid(row=row, column=0, sticky="w", padx=8, pady=6)
-        ttk.Button(controls, text="Start", command=lambda i=i: start_encoder(i, audio_device_combo)).grid(row=row, column=1, padx=8, pady=6)
-        ttk.Button(controls, text="Stop", command=lambda i=i: stop_encoder(i)).grid(row=row, column=2, padx=8, pady=6)
-        ttk.Button(controls, text="Restart", command=lambda i=i: restart_encoder(i, audio_device_combo)).grid(row=row, column=3, padx=8, pady=6)
+    # Create rows for each service
+    lbl_twitch_status = create_service_row(services_frame, "Twitch Bot", 0, start_twitch, stop_twitch, restart_twitch)
+    lbl_overlay_status = create_service_row(services_frame, "Web Overlay", 1, start_overlay, stop_overlay, restart_overlay)
+    lbl_420_status = create_service_row(services_frame, "420 Timer", 2, start_420, stop_420, restart_420)
 
+    # Separator
+    ttk.Separator(services_frame, orient='horizontal').grid(row=3, columnspan=3, sticky='ew', pady=10, padx=5)
+
+    # Create rows for each encoder
+    lbl_encoder_statuses = []
+    for i, enc_cfg in enumerate(ENCODERS):
+        # Use functools.partial to correctly capture the loop variable `i`
+        start_cmd = partial(start_encoder, i, audio_device_combo)
+        stop_cmd = partial(stop_encoder, i)
+        restart_cmd = partial(restart_encoder, i, audio_device_combo)
+        
+        status_lbl = create_service_row(services_frame, enc_cfg["name"], 4 + i, start_cmd, stop_cmd, restart_cmd)
+        lbl_encoder_statuses.append(status_lbl)
+
+    # ===== GLOBAL ACTIONS =====
+    actions_frame = ttk.LabelFrame(dash_inner_frame, text="Global Actions", padding=10)
+    actions_frame.pack(fill="x", padx=10, pady=10)
+
+    ttk.Button(actions_frame, text="TEST 4:20 Blaze", command=test_420).pack(side="left", padx=5, pady=5)
 
     def quit_all() -> None:
         """Stops all services in a separate thread to avoid freezing the GUI, then quits."""
         def shutdown_thread():
             log("Shutting down all services...")
             # Disable the quit button to prevent multiple clicks
-            quit_button.config(state="disabled", text="Quitting...")
+            quit_button.config(state="disabled")
             stop_420()
             stop_overlay()
             stop_twitch()
@@ -273,11 +274,9 @@ def build_gui() -> tk.Tk:
             log("All services stopped. Exiting.")
             root.after(100, root.destroy) # Safely destroy the root window from the main thread
         threading.Thread(target=shutdown_thread, daemon=True).start()
-
-    quit_button = ttk.Button(controls, text="Quit", command=quit_all)
-    quit_button.grid(
-        row=row, column=3, padx=8, pady=10, sticky="e"
-    )
+    
+    quit_button = ttk.Button(actions_frame, text="Quit & Stop All", command=quit_all)
+    quit_button.pack(side="right", padx=5, pady=5)
 
     # ===== LOGS TAB (with scrollbar) =====
     log_container = ttk.Frame(logs_frame)
@@ -392,12 +391,12 @@ def build_gui() -> tk.Tk:
 
         # status lights
         if services.twitch_running:
-            lbl_twitch_status.config(text="● ONLINE", fg=accent)
+            lbl_twitch_status.config(text="● ONLINE", fg=accent, bg=secondary)
         else:
-            lbl_twitch_status.config(text="○ OFFLINE", fg=danger)
+            lbl_twitch_status.config(text="○ OFFLINE", fg=danger, bg=secondary)
 
         if services.overlay_running:
-            lbl_overlay_status.config(text="● RUNNING", fg=accent)
+            lbl_overlay_status.config(text="● RUNNING", fg=accent, bg=secondary)
         else:
             lbl_overlay_status.config(text="○ STOPPED", fg=danger)
 
@@ -411,7 +410,7 @@ def build_gui() -> tk.Tk:
             if services.encoder_running[i] and services.encoder_instances[i]:
                 lbl_encoder_statuses[i].config(text=f"● {services.encoder_instances[i].status}", fg=services.encoder_instances[i].color, bg=secondary)
             else:
-                lbl_encoder_statuses[i].config(text="○ STOPPED", fg="gray")
+                lbl_encoder_statuses[i].config(text="○ STOPPED", fg="gray", bg=secondary)
 
 
         # blaze info
