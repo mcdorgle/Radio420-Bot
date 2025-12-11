@@ -301,25 +301,34 @@ def build_gui() -> tk.Tk:
 
     config_entries = {}
 
+    # Define the keys we expect to see for each section to ensure they are all rendered
+    # This avoids both including parser defaults and missing fallback-only values.
+    expected_keys = {
+        "twitch": ["station_name", "nick", "channel", "oauth"],
+        "database": ["host", "user", "password", "db"],
+        "server": ["host", "port"],
+        "overlay": ["max_results"],
+        "style": ["background", "text_color", "title_color", "font_size", "refresh_rate"]
+    }
+
     # --- Create Config Sections Dynamically ---
     for section in config.sections():
         # Skip sections that are handled manually later
-        if section == "audio" or section.startswith("encoder"):
+        if section not in expected_keys:
             continue
 
         sec_frame = ttk.LabelFrame(config_inner, text=section, padding=10) # This part is correct
         sec_frame.pack(fill="x", padx=10, pady=5)
 
         config_entries[section] = {}
-
-        # Use config.items(section) to include all keys, even those with fallbacks
-        for key, value in config.items(section):
+        
+        for key in expected_keys.get(section, []):
             rowf = ttk.Frame(sec_frame)
             rowf.pack(fill="x", pady=4)
 
             ttk.Label(rowf, text=key, width=20, font=("Segoe UI", 10)).pack(side="left", padx=5)
             e = ttk.Entry(rowf, font=("Segoe UI", 10))
-            e.insert(0, value)
+            e.insert(0, config.get(section, key, fallback=""))
             e.pack(side="left", fill="x", expand=True, padx=5)
 
             config_entries[section][key] = e
@@ -328,24 +337,36 @@ def build_gui() -> tk.Tk:
     audio_frame = ttk.LabelFrame(config_inner, text="Audio Input", padding=10)
     audio_frame.pack(fill="x", padx=10, pady=5, anchor="n")
     
-    audio_devices = get_ffmpeg_dshow_devices()
-    device_names = [f"{d['index']}: {d['name']}" for d in audio_devices]
-    if not device_names:
-        log("Warning: No audio input devices found by FFmpeg.")
-
     rowf_audio = ttk.Frame(audio_frame)
     rowf_audio.pack(fill="x", pady=4)
     ttk.Label(rowf_audio, text="Input Device", width=20, font=("Segoe UI", 10)).pack(side="left", padx=5)
     
-    audio_device_combo = ttk.Combobox(rowf_audio, values=device_names, font=("Segoe UI", 10), state="readonly")
+    audio_device_combo = ttk.Combobox(rowf_audio, font=("Segoe UI", 10), state="readonly")
+    audio_device_combo.pack(side="left", fill="x", expand=True, padx=5)
+    
+    def refresh_audio_devices() -> list:
+        log("Refreshing audio device list...")
+        new_devices = get_ffmpeg_dshow_devices()
+        device_names = [f"{d['index']}: {d['name']}" for d in new_devices]
+        if not device_names:
+            log("Warning: No audio input devices found by FFmpeg.")
+        audio_device_combo['values'] = device_names
+        return device_names
+    
+    # Initial population
+    device_names = refresh_audio_devices()
     initial_device = config.get("audio", "input_device", fallback="")
+    
     if initial_device and any(initial_device in name for name in device_names):
         audio_device_combo.set(next(name for name in device_names if initial_device in name))
     elif device_names:
         audio_device_combo.set(device_names[0])
-    audio_device_combo.pack(side="left", fill="x", expand=True, padx=5)
-    config_entries["audio"] = {"input_device": audio_device_combo}
 
+    config_entries["audio"] = {"input_device": audio_device_combo}
+    
+    refresh_button = ttk.Button(rowf_audio, text="🔄", command=refresh_audio_devices, width=3)
+    refresh_button.pack(side="left", padx=5)
+    
     # --- Encoder Configs ---
     for i, enc_cfg in enumerate(ENCODERS):
         section_name = f"Encoder {i+1} ({enc_cfg['name']})"

@@ -3,7 +3,7 @@ import time
 import re
 
 from config import ( # noqa
-    TWITCH_SERVER, TWITCH_PORT, TWITCH_OAUTH, TWITCH_NICK, TWITCH_CHANNEL, MAX_RESULTS
+    TWITCH_SERVER, TWITCH_PORT, TWITCH_OAUTH, TWITCH_NICK, TWITCH_CHANNEL, MAX_RESULTS, config
 )
 from db import get_db_connection
 from utils import log
@@ -30,8 +30,8 @@ class TwitchBot:
             self.sock.sendall(f"NICK {TWITCH_NICK}\r\n".encode())
             self.sock.sendall(f"JOIN #{TWITCH_CHANNEL}\r\n".encode())
             if self.first_connect:
-                from config import STATION_NAME # Import here to get latest value on reconnect
-                self.send(f"🎧 {STATION_NAME} is now online & taking requests - use !search <song/artist>")
+                station_name = config.get("twitch", "station_name", fallback="Radio420")
+                self.send(f"🎧 {station_name} is now online & taking requests - use !search <song/artist>")
                 self.first_connect = False
             log("Twitch: Connected")
             self.reconnect_delay = 5  # Reset delay on success

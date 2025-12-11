@@ -220,19 +220,8 @@ def get_ffmpeg_dshow_devices() -> list:
     This is the most reliable way to get names FFmpeg will understand.
     """
     devices = []
-    
-    # Determine the path to ffmpeg.exe using a helper function
-    # This logic is now simplified and more robust.
-    try:
-        # In a frozen app, this will point to the bundled ffmpeg.exe
-        base_path = sys._MEIPASS
-        ffmpeg_path = os.path.join(base_path, 'ffmpeg.exe')
-    except Exception:
-        # In a dev environment, assume it's in the system PATH
-        ffmpeg_path = 'ffmpeg'
-        if not any(os.access(os.path.join(path, 'ffmpeg.exe'), os.X_OK) for path in os.environ["PATH"].split(os.pathsep)):
-            log("CRITICAL: ffmpeg.exe not found in system PATH or bundled. Audio devices cannot be listed.")
-            return []
+    ffmpeg_path = 'ffmpeg'  # Always rely on the system PATH
+
     try:
         # Command to list dshow devices
         command = [ffmpeg_path, '-list_devices', 'true', '-f', 'dshow', '-i', 'dummy']
