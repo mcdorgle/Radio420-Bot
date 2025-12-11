@@ -8,6 +8,7 @@ import time
 import requests
 
 from utils import log
+from config import AUDIO_INPUT_DEVICE # Import the global audio input device
 
 class ShoutcastEncoder(threading.Thread):
     """
@@ -60,9 +61,9 @@ class ShoutcastEncoder(threading.Thread):
             '-f', 'dshow',  # Use DirectShow for audio capture on Windows
             '-i', f'audio={self.audio_device_name}',
             '-acodec', 'libmp3lame',  # Encode to MP3
-            '-ar', '44100',          # Sample rate
-            '-ac', '2',              # Stereo
-            '-b:a', '128k',          # Bitrate
+            '-ar', '44100', # Sample rate
+            '-ac', '2', # Stereo
+            '-b:a', self.config.get('bitrate', '128k'), # Bitrate
             '-content_type', 'audio/mpeg', # Set content type for the stream
             '-f', 'mp3',             # Output format
             'pipe:1'                 # Output to stdout
@@ -163,11 +164,12 @@ class ShoutcastEncoder(threading.Thread):
                 self.v1_socket.sendall(f"{self.config['password']}\r\n".encode())
 
                 # 2. Send ICY headers
+                bitrate_kbps = self.config.get('bitrate', '128k').replace('k', '')
                 headers = [
                     f"icy-name:{self.config.get('name', 'Radio420 Stream')}",
                     f"icy-genre:Variety",
                     f"icy-pub:1",
-                    f"icy-br:128", # Bitrate
+                    f"icy-br:{bitrate_kbps}", # Bitrate
                     "\r\n" # End of headers
                 ]
                 self.v1_socket.sendall("\r\n".join(headers).encode())

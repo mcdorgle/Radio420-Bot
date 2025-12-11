@@ -28,9 +28,10 @@ def create_default_config():
     """Creates a default config.ini file if one does not exist."""
     log_msg = f"Config file not found. Creating a default one at: {CONFIG_PATH}"
     print(log_msg) # Log function might not be ready yet, so print.
-    
+
     default_config_content = textwrap.dedent("""\
     [twitch]
+    station_name = Radio420
     nick = your_twitch_username
     channel = your_twitch_channel
     oauth = oauth:xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
@@ -55,17 +56,22 @@ def create_default_config():
     font_size = 20
     refresh_rate = 5
 
+    [audio]
+    input_device = 
+
     [encoder1]
     name = Primary Stream
     host = 127.0.0.1
     port = 8000
     password = hackme
     mount = /stream
+    bitrate = 128k
     enabled = false
 
     [encoder2]
     name = Backup Stream
     enabled = false
+
 
     [encoder3]
     name = Test Stream
@@ -90,6 +96,8 @@ TWITCH_NICK = config.get("twitch", "nick", fallback="")
 TWITCH_CHANNEL = config.get("twitch", "channel", fallback="")
 TWITCH_OAUTH = config.get("twitch", "oauth", fallback="")
 
+STATION_NAME = config.get("twitch", "station_name", fallback="Radio420")
+
 MYSQL_HOST = config.get("database", "host", fallback="localhost")
 MYSQL_USER = config.get("database", "user", fallback="root")
 MYSQL_PASS = config.get("database", "password", fallback="")
@@ -107,6 +115,7 @@ TITLECOL = config.get("style", "title_color", fallback="#FFC107")
 FSIZE = config.getint("style", "font_size", fallback=20)
 
 # Shoutcast Encoder Configs (up to 3)
+AUDIO_INPUT_DEVICE = config.get("audio", "input_device", fallback="")
 ENCODERS = []
 for i in range(1, 4):
     prefix = f"encoder{i}"
@@ -117,6 +126,7 @@ for i in range(1, 4):
             "port": config.getint(prefix, "port", fallback=8000),
             "password": config.get(prefix, "password", fallback=""),
             "mount": config.get(prefix, "mount", fallback="/stream"),
+            "bitrate": config.get(prefix, "bitrate", fallback="128k"),
             "enabled": config.getboolean(prefix, "enabled", fallback=False)
         })
 
@@ -124,7 +134,18 @@ def save_config_from_gui(entries: dict) -> None:
     """Saves the configuration from the GUI's entry widgets and variables."""
     # update config object
     for section, keys in entries.items():
-        if section != "audio": # Do not save the audio section directly, it's a combobox selection
+        if section == "audio": # Handle audio device separately
+            selected_device_display = keys["input_device"].get() # Get the displayed value
+            # The displayed value is "index: device name". We need to save just the device name.
+            if selected_device_display and ":" in selected_device_display:
+                device_name_to_save = selected_device_display.split(":", 1)[1].strip()
+            else:
+                device_name_to_save = selected_device_display # Fallback if format is unexpected
+            config.set("audio", "input_device", device_name_to_save)
+            continue
+
+        # For all other sections (general, twitch, database, encoders, etc.)
+        if section != "audio":
             for key, value_source in keys.items():
                 # Handle different Tkinter variable types
                 if hasattr(value_source, 'get'): # Covers Entry, BooleanVar, etc.

@@ -15,7 +15,7 @@ from PIL import ImageTk, Image  # Added for image support in Tkinter
 from config import ( 
     CONFIG_PATH, ENCODERS, HTTP_HOST, HTTP_PORT, save_config_from_gui, config
 )
-from utils import log, log_queue, TkLogHandler
+from utils import log, log_queue, TkLogHandler # noqa
 from web_overlay import format_eta, shared_state as overlay_shared_state
 from blaze_it import fire_420
 from shoutcast_encoder import get_ffmpeg_dshow_devices
@@ -37,7 +37,6 @@ def resource_path(relative_path):
 
 LOGO_FILE = resource_path("logo.png")
 ICON_FILE = resource_path("logo.ico")
-audio_device_combo: ttk.Combobox = None # Global reference to the audio device dropdown
 
 werk_handler = TkLogHandler()
 werk_handler.setFormatter(logging.Formatter("[%(levelname)s] %(message)s"))
@@ -116,7 +115,7 @@ def handle_save_config(entries: dict) -> None:
 
 
 def build_gui() -> tk.Tk:
-    global audio_device_combo
+    # This will be created and passed directly where needed, removing the global variable dependency.
     root = tk.Tk()
     root.title("Radio420 Control Panel v1.8")
     root.geometry("600x750")  # Set a default size for better appearance
@@ -243,17 +242,6 @@ def build_gui() -> tk.Tk:
     # Separator
     ttk.Separator(services_frame, orient='horizontal').grid(row=3, columnspan=3, sticky='ew', pady=10, padx=5)
 
-    # Create rows for each encoder
-    lbl_encoder_statuses = []
-    for i, enc_cfg in enumerate(ENCODERS):
-        # Use functools.partial to correctly capture the loop variable `i`
-        start_cmd = partial(start_encoder, i, audio_device_combo)
-        stop_cmd = partial(stop_encoder, i)
-        restart_cmd = partial(restart_encoder, i, audio_device_combo)
-        
-        status_lbl = create_service_row(services_frame, enc_cfg["name"], 4 + i, start_cmd, stop_cmd, restart_cmd)
-        lbl_encoder_statuses.append(status_lbl)
-
     # ===== GLOBAL ACTIONS =====
     actions_frame = ttk.LabelFrame(dash_inner_frame, text="Global Actions", padding=10)
     actions_frame.pack(fill="x", padx=10, pady=10)
@@ -313,30 +301,19 @@ def build_gui() -> tk.Tk:
 
     config_entries = {}
 
-    # --- Audio Config ---
-    audio_frame = ttk.LabelFrame(config_inner, text="audio", padding=10)
-    audio_frame.pack(fill="x", padx=10, pady=5, anchor="n")
-
-    audio_devices = get_ffmpeg_dshow_devices()
-    device_names = [f"{d['index']}: {d['name']}" for d in audio_devices]
-    
-    rowf_audio = ttk.Frame(audio_frame)
-    rowf_audio.pack(fill="x", pady=4)
-    ttk.Label(rowf_audio, text="Input Device", width=20, font=("Segoe UI", 10)).pack(side="left", padx=5)
-    
-    audio_device_combo = ttk.Combobox(rowf_audio, values=device_names, font=("Segoe UI", 10), state="readonly")
-    if device_names:
-        audio_device_combo.set(device_names[0]) # Default to the first device
-    audio_device_combo.pack(side="left", fill="x", expand=True, padx=5)
-
+    # --- Create Config Sections Dynamically ---
     for section in config.sections():
-        if section == "audio" or section.startswith("encoder"): continue # Handled separately
-        sec_frame = ttk.LabelFrame(config_inner, text=section, padding=10)
+        # Skip sections that are handled manually later
+        if section == "audio" or section.startswith("encoder"):
+            continue
+
+        sec_frame = ttk.LabelFrame(config_inner, text=section, padding=10) # This part is correct
         sec_frame.pack(fill="x", padx=10, pady=5)
 
         config_entries[section] = {}
 
-        for key, value in config[section].items():
+        # Use config.items(section) to include all keys, even those with fallbacks
+        for key, value in config.items(section):
             rowf = ttk.Frame(sec_frame)
             rowf.pack(fill="x", pady=4)
 
@@ -347,7 +324,29 @@ def build_gui() -> tk.Tk:
 
             config_entries[section][key] = e
 
-    # Add Shoutcast Encoder Configs
+    # --- Audio Config ---
+    audio_frame = ttk.LabelFrame(config_inner, text="Audio Input", padding=10)
+    audio_frame.pack(fill="x", padx=10, pady=5, anchor="n")
+    
+    audio_devices = get_ffmpeg_dshow_devices()
+    device_names = [f"{d['index']}: {d['name']}" for d in audio_devices]
+    if not device_names:
+        log("Warning: No audio input devices found by FFmpeg.")
+
+    rowf_audio = ttk.Frame(audio_frame)
+    rowf_audio.pack(fill="x", pady=4)
+    ttk.Label(rowf_audio, text="Input Device", width=20, font=("Segoe UI", 10)).pack(side="left", padx=5)
+    
+    audio_device_combo = ttk.Combobox(rowf_audio, values=device_names, font=("Segoe UI", 10), state="readonly")
+    initial_device = config.get("audio", "input_device", fallback="")
+    if initial_device and any(initial_device in name for name in device_names):
+        audio_device_combo.set(next(name for name in device_names if initial_device in name))
+    elif device_names:
+        audio_device_combo.set(device_names[0])
+    audio_device_combo.pack(side="left", fill="x", expand=True, padx=5)
+    config_entries["audio"] = {"input_device": audio_device_combo}
+
+    # --- Encoder Configs ---
     for i, enc_cfg in enumerate(ENCODERS):
         section_name = f"Encoder {i+1} ({enc_cfg['name']})"
         sec_frame = ttk.LabelFrame(config_inner, text=section_name, padding=10)
@@ -364,6 +363,7 @@ def build_gui() -> tk.Tk:
         chk_enabled.pack(side="left", padx=5)
         config_entries[f"encoder{i+1}"]["enabled"] = enabled_var # Store the variable
 
+        # Add other text entries
         for key in ["name", "host", "port", "password", "mount"]:
             rowf = ttk.Frame(sec_frame)
             rowf.pack(fill="x", pady=4)
@@ -372,14 +372,35 @@ def build_gui() -> tk.Tk:
             e = ttk.Entry(rowf, font=("Segoe UI", 10))
             e.insert(0, str(enc_cfg[key]))
             e.pack(side="left", fill="x", expand=True, padx=5)
-
             config_entries[f"encoder{i+1}"][key] = e
+
+        # Bitrate Combobox
+        rowf_bitrate = ttk.Frame(sec_frame)
+        rowf_bitrate.pack(fill="x", pady=4)
+        ttk.Label(rowf_bitrate, text="bitrate", width=20, font=("Segoe UI", 10)).pack(side="left", padx=5)
+        bitrate_options = ["64k", "96k", "128k", "192k", "256k", "320k"]
+        e = ttk.Combobox(rowf_bitrate, values=bitrate_options, font=("Segoe UI", 10), state="readonly")
+        e.set(enc_cfg.get("bitrate", "128k"))
+        e.pack(side="left", fill="x", expand=True, padx=5)
+        config_entries[f"encoder{i+1}"]["bitrate"] = e
 
     ttk.Button(
         config_inner,
         text="💾 Save Config",
         command=lambda: handle_save_config(config_entries),
     ).pack(pady=10)
+
+    # --- Create Encoder Service Rows (after audio_device_combo is created) ---
+    # This is the correct place to create these, now that the combobox exists.
+    lbl_encoder_statuses = []
+    for i, enc_cfg in enumerate(ENCODERS):
+        start_cmd = partial(start_encoder, i, audio_device_combo)
+        stop_cmd = partial(stop_encoder, i)
+        restart_cmd = partial(restart_encoder, i, audio_device_combo)
+        
+        status_lbl = create_service_row(services_frame, enc_cfg["name"], 4 + i, start_cmd, stop_cmd, restart_cmd)
+        lbl_encoder_statuses.append(status_lbl)
+
 
     # ===== UI UPDATE LOOP =====
     def update_ui() -> None:
