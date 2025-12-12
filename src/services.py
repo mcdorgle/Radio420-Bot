@@ -1,6 +1,8 @@
 import threading
 import time
 import socket
+import re
+import requests
 from datetime import datetime, timedelta
 import pytz
 
@@ -12,7 +14,7 @@ from web_overlay import app, shared_state
 from blaze_it import compute_next_420, fire_420
 from shoutcast_encoder import ShoutcastEncoder
 from utils import log
-from config import HTTP_HOST, HTTP_PORT, ENCODERS
+from config import HTTP_HOST, HTTP_PORT, ENCODERS, TWITCH_CHANNEL, POINTS_PASSIVE_INTERVAL, POINTS_PASSIVE_AMOUNT, POINTS_ACTIVE_AMOUNT, POINTS_ACTIVE_COOLDOWN
 
 # ======================================================
 # GLOBALS / STATE
@@ -25,6 +27,9 @@ twitch_running: bool = False
 overlay_server: 'make_server' = None
 overlay_thread: threading.Thread = None
 overlay_running: bool = False
+
+points_thread: threading.Thread = None
+points_running: bool = False
 
 tracker_thread: threading.Thread = None
 announcer_thread: threading.Thread = None
@@ -48,6 +53,7 @@ def start_twitch() -> None:
     twitch_thread = threading.Thread(target=run_twitch_loop, daemon=True)
     twitch_running = True
     twitch_thread.start()
+    start_points_manager()
     log("Twitch: started")
 
 def stop_twitch() -> None:
@@ -56,14 +62,30 @@ def stop_twitch() -> None:
         return
     if bot_instance:
         bot_instance.stop()
+        # The stop() method sets bot_instance.running to False, which will cause the loop to exit.
     twitch_running = False
     if twitch_thread:
         twitch_thread.join(timeout=5)
+    stop_points_manager()
     log("Twitch: stopped")
 
 def run_twitch_loop():
     global bot_instance
     bot_instance.connect()
+
+    # Command mapping
+    commands = {
+        "!search": bot_instance.search,
+        "!points": bot_instance.points,
+        "!uptime": bot_instance.uptime,
+        "!lastplayed": bot_instance.lastplayed,
+        "!queue": bot_instance.queue,
+        "!gamble": bot_instance.gamble,
+        "!addpoints": bot_instance.addpoints,
+        "!leaderboard": bot_instance.leaderboard,
+        "!give": bot_instance.give_points,
+    }
+
     while bot_instance.running:
         try:
             data = bot_instance.sock.recv(2048).decode("utf8", "ignore")
@@ -71,6 +93,7 @@ def run_twitch_loop():
                 if not bot_instance.running: break
                 time.sleep(1)
                 continue
+
             for line in data.split("\r\n"):
                 if not line: continue
                 if "PING" in line:
@@ -78,7 +101,7 @@ def run_twitch_loop():
                         bot_instance.sock.sendall(b"PONG\r\n")
                     except Exception: pass
                 if "PRIVMSG" in line:
-                    user, msg = bot_instance.parse(line)
+                    user, msg, tags = bot_instance.parse(line)
                     if not user and "Login authentication failed" in msg:
                         log("Twitch Error: Login authentication failed. Please check your oauth token in config.ini.")
                         messagebox.showerror("Twitch Auth Error", "Login failed. Please check your 'oauth' token in the config and restart the bot.")
@@ -86,21 +109,44 @@ def run_twitch_loop():
                         stop_twitch()
                         return
                     if not msg: continue
-                    if msg.startswith("!search"):
-                        bot_instance.search(user, msg[8:].strip())
+
+                    # Active point earning
+                    now = time.time()
+                    if now - bot_instance.last_active_times.get(user, 0) > POINTS_ACTIVE_COOLDOWN:
+                        bot_instance.update_user_points(user, POINTS_ACTIVE_AMOUNT, is_active=True)
+                        bot_instance.last_active_times[user] = now
+
+                    # Command parsing
+                    command_part = msg.split(" ")[0].lower()
+                    if command_part in commands:
+                        # Pass tags to the command handler for permission checks
+                        if command_part == "!addpoints":
+                            commands[command_part](user, msg, tags)
+                        else:
+                            commands[command_part](user, msg)
                         continue
-                    m = bot_instance.re.match(r"!(\d+)$", msg)
+
+                    m = re.match(r"!pick (\d+)", msg, re.IGNORECASE)
                     if m:
                         bot_instance.pick(user, int(m.group(1)))
+                        continue
+
+                    m_playnext = re.match(r"!playnext (\d+)", msg, re.IGNORECASE)
+                    if m_playnext:
+                        bot_instance.playnext(user, int(m_playnext.group(1)))
                         continue
         except socket.timeout:
             log("Twitch: Socket timeout, reconnecting...")
             bot_instance.connect()
-        except Exception as e:
+        except (socket.error, BrokenPipeError) as e:
             if not bot_instance.running: break
-            log(f"Twitch Loop Error: {e}")
+            log(f"Twitch Socket Error: {e}. Reconnecting...")
             time.sleep(3)
             bot_instance.connect()
+        except Exception as e:
+            if not bot_instance.running: break
+            log(f"An unexpected error occurred in Twitch loop: {e}")
+            time.sleep(5) # Wait a bit longer on unexpected errors
     log("Twitch: Bot loop exiting")
     if bot_instance.sock:
         bot_instance.sock.close()
@@ -134,6 +180,47 @@ def stop_overlay() -> None:
     overlay_thread = None
     overlay_running = False
     log("Overlay: stopped")
+
+# ======================================================
+# POINTS MANAGER SERVICE
+# ======================================================
+
+def start_points_manager():
+    global points_thread, points_running
+    if points_running: return
+    points_running = True
+    points_thread = threading.Thread(target=run_points_manager_loop, daemon=True)
+    points_thread.start()
+    log("Points Manager: started")
+
+def stop_points_manager():
+    global points_running, points_thread
+    if not points_running: return
+    points_running = False
+    if points_thread:
+        points_thread.join(timeout=5)
+    log("Points Manager: stopped")
+
+def run_points_manager_loop():
+    """Periodically awards points to active chatters."""
+    global bot_instance
+    while points_running:
+        time.sleep(POINTS_PASSIVE_INTERVAL * 60)
+        if not bot_instance or not bot_instance.running:
+            continue
+        
+        try:
+            # This is an undocumented Twitch endpoint, but it's widely used.
+            url = f"https://tmi.twitch.tv/group/user/{TWITCH_CHANNEL}/chatters"
+            response = requests.get(url, timeout=5)
+            response.raise_for_status()
+            chatters_data = response.json()
+            all_chatters = set(sum(chatters_data['chatters'].values(), []))
+            log(f"Points Manager: Found {len(all_chatters)} chatters. Awarding {POINTS_PASSIVE_AMOUNT} points.")
+            for user in all_chatters:
+                bot_instance.update_user_points(user, POINTS_PASSIVE_AMOUNT)
+        except Exception as e:
+            log(f"Points Manager Error: Could not fetch chatters. {e}")
 
 # ======================================================
 # 420 SERVICE

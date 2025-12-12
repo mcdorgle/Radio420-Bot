@@ -8,6 +8,6 @@ def get_db_connection():
         password=MYSQL_PASS,
         database=MYSQL_DB,
         charset="utf8mb4",
-        cursorclass=pymysql.cursors.DictCursor,
-        autocommit=True
+        cursorclass=pymysql.cursors.DictCursor
+        # autocommit is disabled by default, which is what we want for transactions.
     )

@@ -31,7 +31,7 @@ def create_default_config():
 
     default_config_content = textwrap.dedent("""\
     [twitch]
-    station_name = Radio420
+    station_name = RadioBot
     nick = your_twitch_username
     channel = your_twitch_channel
     oauth = oauth:xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
@@ -45,6 +45,16 @@ def create_default_config():
     [server]
     host = 127.0.0.1
     port = 8080
+
+    [points]
+    currency_name = RadioBux
+    passive_earn_amount = 5
+    passive_earn_interval_minutes = 10
+    active_earn_amount = 1
+    active_earn_cooldown_seconds = 60
+    request_cost = 25
+    playnext_cost = 250
+    give_points_tax_percent = 5
 
     [overlay]
     max_results = 5
@@ -96,7 +106,7 @@ TWITCH_NICK = config.get("twitch", "nick", fallback="")
 TWITCH_CHANNEL = config.get("twitch", "channel", fallback="")
 TWITCH_OAUTH = config.get("twitch", "oauth", fallback="")
 
-STATION_NAME = config.get("twitch", "station_name", fallback="Radio420")
+STATION_NAME = config.get("twitch", "station_name", fallback="RadioBot")
 
 MYSQL_HOST = config.get("database", "host", fallback="localhost")
 MYSQL_USER = config.get("database", "user", fallback="root")
@@ -105,6 +115,16 @@ MYSQL_DB = config.get("database", "db", fallback="radiodj")
 
 HTTP_HOST = config.get("server", "host", fallback="0.0.0.0")
 HTTP_PORT = config.getint("server", "port", fallback=8080)
+
+POINTS_CURRENCY = config.get("points", "currency_name", fallback="points")
+POINTS_PASSIVE_AMOUNT = config.getint("points", "passive_earn_amount", fallback=5)
+POINTS_PASSIVE_INTERVAL = config.getint("points", "passive_earn_interval_minutes", fallback=10)
+POINTS_ACTIVE_AMOUNT = config.getint("points", "active_earn_amount", fallback=1)
+POINTS_ACTIVE_COOLDOWN = config.getint("points", "active_earn_cooldown_seconds", fallback=60)
+POINTS_REQUEST_COST = config.getint("points", "request_cost", fallback=25)
+POINTS_PLAYNEXT_COST = config.getint("points", "playnext_cost", fallback=250)
+POINTS_GIVE_TAX = config.getint("points", "give_points_tax_percent", fallback=5)
+
 
 MAX_RESULTS = config.getint("overlay", "max_results", fallback=5)
 REFRESH = config.getint("style", "refresh_rate", fallback=5)

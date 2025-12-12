@@ -117,7 +117,7 @@ def handle_save_config(entries: dict) -> None:
 def build_gui() -> tk.Tk:
     # This will be created and passed directly where needed, removing the global variable dependency.
     root = tk.Tk()
-    root.title("Radio420 Control Panel v1.8")
+    root.title("RadioBot v4.0")
     root.geometry("600x750")  # Set a default size for better appearance
 
     # Set the window icon, ensuring it's bundled
@@ -165,7 +165,7 @@ def build_gui() -> tk.Tk:
         log(f"Logo file not found at {LOGO_FILE}. Skipping logo display.")
 
     # App title
-    title_label = ttk.Label(header_frame, text="Radio420 Control Panel", font=("Segoe UI", 18, "bold"), foreground=accent)
+    title_label = ttk.Label(header_frame, text="RadioBot", font=("Segoe UI", 18, "bold"), foreground=accent)
     title_label.pack(side="left", expand=True)
 
     notebook = ttk.Notebook(root)
@@ -307,22 +307,19 @@ def build_gui() -> tk.Tk:
         "twitch": ["station_name", "nick", "channel", "oauth"],
         "database": ["host", "user", "password", "db"],
         "server": ["host", "port"],
+        "points": ["currency_name", "passive_earn_amount", "passive_earn_interval_minutes", "active_earn_amount", "active_earn_cooldown_seconds", "request_cost", "playnext_cost", "give_points_tax_percent"],
         "overlay": ["max_results"],
         "style": ["background", "text_color", "title_color", "font_size", "refresh_rate"]
     }
 
     # --- Create Config Sections Dynamically ---
-    for section in config.sections():
-        # Skip sections that are handled manually later
-        if section not in expected_keys:
-            continue
-
-        sec_frame = ttk.LabelFrame(config_inner, text=section, padding=10) # This part is correct
+    for section, keys in expected_keys.items():
+        sec_frame = ttk.LabelFrame(config_inner, text=section, padding=10)
         sec_frame.pack(fill="x", padx=10, pady=5)
 
         config_entries[section] = {}
         
-        for key in expected_keys.get(section, []):
+        for key in keys:
             rowf = ttk.Frame(sec_frame)
             rowf.pack(fill="x", pady=4)
 
@@ -330,7 +327,6 @@ def build_gui() -> tk.Tk:
             e = ttk.Entry(rowf, font=("Segoe UI", 10))
             e.insert(0, config.get(section, key, fallback=""))
             e.pack(side="left", fill="x", expand=True, padx=5)
-
             config_entries[section][key] = e
 
     # --- Audio Config ---
@@ -412,7 +408,6 @@ def build_gui() -> tk.Tk:
     ).pack(pady=10)
 
     # --- Create Encoder Service Rows (after audio_device_combo is created) ---
-    # This is the correct place to create these, now that the combobox exists.
     lbl_encoder_statuses = []
     for i, enc_cfg in enumerate(ENCODERS):
         start_cmd = partial(start_encoder, i, audio_device_combo)
@@ -474,25 +469,7 @@ def build_gui() -> tk.Tk:
     update_ui()
     return root
 
-
-# ======================================================
-# MAIN (with auto-start services option if desired)
-# ======================================================
-
 if __name__ == "__main__":
-    # Optional: Auto-start services on launch
-    # start_twitch()
-    # start_overlay()
-    # start_420()
-
     gui = build_gui()
     gui.mainloop()
-
-    # The mainloop has exited. The shutdown logic is now handled by the `quit_all` function
-    # to ensure threads are joined correctly before the application closes.
-    # We can add a final log here to confirm exit.
-    print("Radio420 GUI closed.")
-    # stop_twitch()
-    # stop_overlay()
-    # stop_420()
-    # for i in range(3): stop_encoder(i)
+    log("Radio420 GUI closed.")
