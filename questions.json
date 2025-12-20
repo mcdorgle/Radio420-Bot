@@ -1,0 +1,118 @@
+{
+    "questions": [
+    {
+        "question": "Which of these is NOT a primary color?",
+        "answers": [
+            "Red",
+            "Green",
+            "Blue",
+            "Yellow"
+        ],
+        "correct": 1
+    },
+    {
+        "question": "What is the capital of Canada?",
+        "answers": [
+            "Toronto",
+            "Vancouver",
+            "Montreal",
+            "Ottawa"
+        ],
+        "correct": 3
+    },
+    {
+        "question": "In the movie 'The Matrix', what is the main character's hacker name?",
+        "answers": [
+            "Cipher",
+            "Morpheus",
+            "Neo",
+            "Trinity"
+        ],
+        "correct": 2
+    },
+    {
+        "question": "Which planet is known as the Red Planet?",
+        "answers": [
+            "Venus",
+            "Mars",
+            "Jupiter",
+            "Saturn"
+        ],
+        "correct": 1
+    },
+    {
+        "question": "What does 'HTTP' stand for?",
+        "answers": [
+            "HyperText Transfer Protocol",
+            "High-Tech Text Protocol",
+            "Hyperlink and Text Transfer Page",
+            "Home Tool for Text Processing"
+        ],
+        "correct": 0
+    },
+    {
+        "question": "Who wrote 'To Kill a Mockingbird'?",
+        "answers": [
+            "Harper Lee",
+            "J.K. Rowling",
+            "Ernest Hemingway",
+            "Mark Twain"
+        ],
+        "correct": 0
+    },
+    {
+        "question": "What is the smallest prime number?",
+        "answers": [
+            "0",
+            "1",
+            "2",
+            "3"
+        ],
+        "correct": 2
+    },
+    {
+        "question": "Which band performed at the first-ever Live Aid concert in 1985?",
+        "answers": [
+            "The Beatles",
+            "Led Zeppelin",
+            "Queen",
+            "Status Quo"
+        ],
+        "correct": 3
+    },
+    {
+        "question": "What is the main ingredient in guacamole?",
+        "answers": [
+            "Tomato",
+            "Onion",
+            "Avocado",
+            "Lime"
+        ],
+        "correct": 2
+    },
+    {
+        "question": "How many hearts does an octopus have?",
+        "answers": [
+            "One",
+            "Two",
+            "Three",
+            "Four"
+        ],
+        "correct": 2
+    }
+    ],
+    "bleep_attacks": [
+        {
+            "category": "Things you find in a toolbox",
+            "items": [
+                {"text": "Hammer", "correct": true},
+                {"text": "Banana", "correct": false},
+                {"text": "Wrench", "correct": true},
+                {"text": "Screwdriver", "correct": true},
+                {"text": "A Lost Sock", "correct": false},
+                {"text": "Pliers", "correct": true},
+                {"text": "Duct Tape", "correct": true}
+            ]
+        }
+    ]
+}

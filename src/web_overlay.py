@@ -1,12 +1,23 @@
-from flask import Flask, render_template_string
+from flask import Flask, render_template_string, render_template
+from flask_socketio import SocketIO
 from datetime import datetime, timedelta
 import pytz
+import logging
+import os
 
 from db import get_db_connection
 from utils import log
 from config import REFRESH, BG, COLOR, TITLECOL, FSIZE
 
 app = Flask(__name__)
+# Prevent Flask's default logger from conflicting with our setup
+app.logger.disabled = True
+logging.getLogger('werkzeug').propagate = False  # Prevents duplicate logs to console
+
+# Tell Flask to look for templates in the same directory as this script (the 'src' folder)
+app.template_folder = os.path.dirname(os.path.abspath(__file__))
+
+socketio = SocketIO(app, async_mode='threading')
 
 # Shared state with the main GUI thread
 shared_state = {
@@ -207,3 +218,5 @@ def index():
         titlecol=TITLECOL,
         fsize=FSIZE,
     )
+
+# Bleep game removed: /bleep route disabled

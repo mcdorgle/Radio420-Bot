@@ -103,6 +103,7 @@ def test_420() -> None:
     overlay_shared_state["last_420_message"] = msg
     overlay_shared_state["popup_message"] = msg
     overlay_shared_state["popup_expire_utc"] = datetime.now(pytz.utc) + timedelta(seconds=12)
+# Bleep game functionality removed
 
 def handle_save_config(entries: dict) -> None:
     save_config_from_gui(entries)
@@ -205,11 +206,12 @@ def build_gui() -> tk.Tk:
     lbl_overlay_url = ttk.Label(
         info_frame,
         text=f"Overlay URL: http://{HTTP_HOST}:{HTTP_PORT}/",
-        font=("Segoe UI", 10)
+        font=("Segoe UI", 9)
     )
     lbl_overlay_url.pack(anchor="w", pady=4, padx=8)
-
-    # ===== SERVICE CONTROLS (Integrated Status & Controls) =====
+    # Bleep game removed; game URL hidden.
+    
+    # ===== SERVICE CONTROLS =====
     services_frame = ttk.LabelFrame(dash_inner_frame, text="Service Controls", padding=10)
     services_frame.pack(fill="x", padx=10, pady=10)
 
@@ -238,9 +240,12 @@ def build_gui() -> tk.Tk:
     lbl_twitch_status = create_service_row(services_frame, "Twitch Bot", 0, start_twitch, stop_twitch, restart_twitch)
     lbl_overlay_status = create_service_row(services_frame, "Web Overlay", 1, start_overlay, stop_overlay, restart_overlay)
     lbl_420_status = create_service_row(services_frame, "420 Timer", 2, start_420, stop_420, restart_420)
+    
+    # Bleep game removed; controls hidden.
+
 
     # Separator
-    ttk.Separator(services_frame, orient='horizontal').grid(row=3, columnspan=3, sticky='ew', pady=10, padx=5)
+    ttk.Separator(services_frame, orient='horizontal').grid(row=4, columnspan=3, sticky='ew', pady=10, padx=5)
 
     # ===== GLOBAL ACTIONS =====
     actions_frame = ttk.LabelFrame(dash_inner_frame, text="Global Actions", padding=10)
@@ -307,7 +312,7 @@ def build_gui() -> tk.Tk:
         "twitch": ["station_name", "nick", "channel", "oauth"],
         "database": ["host", "user", "password", "db"],
         "server": ["host", "port"],
-        "points": ["currency_name", "passive_earn_amount", "passive_earn_interval_minutes", "active_earn_amount", "active_earn_cooldown_seconds", "request_cost", "playnext_cost", "give_points_tax_percent"],
+        "points": ["points_name", "currency_name", "passive_earn_amount", "passive_earn_interval_minutes", "active_earn_amount", "active_earn_cooldown_seconds", "request_cost", "playnext_cost", "give_points_tax_percent"],
         "overlay": ["max_results"],
         "style": ["background", "text_color", "title_color", "font_size", "refresh_rate"]
     }
@@ -414,7 +419,7 @@ def build_gui() -> tk.Tk:
         stop_cmd = partial(stop_encoder, i)
         restart_cmd = partial(restart_encoder, i, audio_device_combo)
         
-        status_lbl = create_service_row(services_frame, enc_cfg["name"], 4 + i, start_cmd, stop_cmd, restart_cmd)
+        status_lbl = create_service_row(services_frame, enc_cfg["name"], 5 + i, start_cmd, stop_cmd, restart_cmd)
         lbl_encoder_statuses.append(status_lbl)
 
 
@@ -435,12 +440,14 @@ def build_gui() -> tk.Tk:
         if services.overlay_running:
             lbl_overlay_status.config(text="● RUNNING", fg=accent, bg=secondary)
         else:
-            lbl_overlay_status.config(text="○ STOPPED", fg=danger)
+            lbl_overlay_status.config(text="○ STOPPED", fg=danger, bg=secondary)
 
         if services.tracker_running and services.announcer_running:
             lbl_420_status.config(text="● ACTIVE", fg=accent)
         else:
             lbl_420_status.config(text="○ IDLE", fg=danger)
+        
+        # Bleep game removed; no status displayed
 
         # Encoder statuses
         for i in range(len(ENCODERS)):

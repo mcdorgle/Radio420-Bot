@@ -1,0 +1,10 @@
+requests
+pymysql
+pyttsx3
+pyaudio
+Pillow
+Flask
+Flask-SocketIO
+werkzeug
+pytz
+pyinstaller

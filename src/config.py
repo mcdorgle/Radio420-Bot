@@ -48,6 +48,7 @@ def create_default_config():
 
     [points]
     currency_name = RadioBux
+    points_name = points
     passive_earn_amount = 5
     passive_earn_interval_minutes = 10
     active_earn_amount = 1
@@ -95,6 +96,20 @@ if not os.path.exists(CONFIG_PATH):
 
 config.read(CONFIG_PATH, encoding="utf-8")
 
+
+def safe_getint(section: str, option: str, fallback: int) -> int:
+    """Return integer config value or fallback when the option is missing/empty/invalid."""
+    try:
+        raw = config.get(section, option, fallback=None)
+        if raw is None:
+            return fallback
+        raw = str(raw).strip()
+        if raw == "":
+            return fallback
+        return int(raw)
+    except Exception:
+        return fallback
+
 # ======================================================
 # CONFIG VALUES WITH VALIDATION
 # ======================================================
@@ -114,25 +129,26 @@ MYSQL_PASS = config.get("database", "password", fallback="")
 MYSQL_DB = config.get("database", "db", fallback="radiodj")
 
 HTTP_HOST = config.get("server", "host", fallback="0.0.0.0")
-HTTP_PORT = config.getint("server", "port", fallback=8080)
+HTTP_PORT = safe_getint("server", "port", 8080)
 
 POINTS_CURRENCY = config.get("points", "currency_name", fallback="points")
-POINTS_PASSIVE_AMOUNT = config.getint("points", "passive_earn_amount", fallback=5)
-POINTS_PASSIVE_INTERVAL = config.getint("points", "passive_earn_interval_minutes", fallback=10)
-POINTS_ACTIVE_AMOUNT = config.getint("points", "active_earn_amount", fallback=1)
-POINTS_ACTIVE_COOLDOWN = config.getint("points", "active_earn_cooldown_seconds", fallback=60)
-POINTS_REQUEST_COST = config.getint("points", "request_cost", fallback=25)
-POINTS_PLAYNEXT_COST = config.getint("points", "playnext_cost", fallback=250)
-POINTS_GIVE_TAX = config.getint("points", "give_points_tax_percent", fallback=5)
+POINTS_NAME = config.get("points", "points_name", fallback=POINTS_CURRENCY)
+POINTS_PASSIVE_AMOUNT = safe_getint("points", "passive_earn_amount", 5)
+POINTS_PASSIVE_INTERVAL = safe_getint("points", "passive_earn_interval_minutes", 10)
+POINTS_ACTIVE_AMOUNT = safe_getint("points", "active_earn_amount", 1)
+POINTS_ACTIVE_COOLDOWN = safe_getint("points", "active_earn_cooldown_seconds", 60)
+POINTS_REQUEST_COST = safe_getint("points", "request_cost", 25)
+POINTS_PLAYNEXT_COST = safe_getint("points", "playnext_cost", 250)
+POINTS_GIVE_TAX = safe_getint("points", "give_points_tax_percent", 5)
 
 
-MAX_RESULTS = config.getint("overlay", "max_results", fallback=5)
-REFRESH = config.getint("style", "refresh_rate", fallback=5)
+MAX_RESULTS = safe_getint("overlay", "max_results", 5)
+REFRESH = safe_getint("style", "refresh_rate", 5)
 
 BG = config.get("style", "background", fallback="#000000")
 COLOR = config.get("style", "text_color", fallback="#FFEB3B")
 TITLECOL = config.get("style", "title_color", fallback="#FFC107")
-FSIZE = config.getint("style", "font_size", fallback=20)
+FSIZE = safe_getint("style", "font_size", 20)
 
 # Shoutcast Encoder Configs (up to 3)
 AUDIO_INPUT_DEVICE = config.get("audio", "input_device", fallback="")
@@ -140,10 +156,10 @@ ENCODERS = []
 for i in range(1, 4):
     prefix = f"encoder{i}"
     if config.has_section(prefix):
-        ENCODERS.append({
+            ENCODERS.append({
             "name": config.get(prefix, "name", fallback=f"Encoder {i}"),
             "host": config.get(prefix, "host", fallback="localhost"),
-            "port": config.getint(prefix, "port", fallback=8000),
+                "port": safe_getint(prefix, "port", 8000),
             "password": config.get(prefix, "password", fallback=""),
             "mount": config.get(prefix, "mount", fallback="/stream"),
             "bitrate": config.get(prefix, "bitrate", fallback="128k"),
